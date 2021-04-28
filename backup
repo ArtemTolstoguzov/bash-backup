@@ -1,0 +1,98 @@
+#! /bin/bash
+
+if [ "$1" = "--help" ]
+then
+(
+    echo
+    echo "  "BackUp by Artem Tolstoguzov:
+    echo \*Создание бэкап файлов с заданным расширением 
+    echo \*Проверка целостности бэкапов
+    echo \*Хранение определенного числа бэкапов и удаление старых
+    echo \*Создание бэкапов с определенной периодичностью
+    echo
+    echo "-------------------------------------------------------"
+    echo
+    echo ПЕРОВНАЧАЛЬНАЯ НАСТРОЙКА:
+    echo 1. Поместить файлы backup и cfg.cfg в ОДНУ ДИРЕКТОРИЮ
+    echo 2. Открыть файл cfg.cfg и заполнить его согласно инструкции
+    echo 3. Открыть терминал в директории с файлом  backup и прописать \"chmod +x backup\"  чтобы дать ему права исполняемого файла
+    echo
+    echo "-------------------------------------------------------"
+    echo 
+    echo ОПЦИИ:
+    echo 1. backup - разовый бэкап
+    echo 2. backup check - проверить целостность бэкапа
+    echo 3. backup period - задать переодичнотсть создания бэкапов\(в формате crontab\)
+    echo
+)
+exit 0
+fi
+
+# читаем нужные данные из cfg.cfg
+cp cfg.cfg ~/
+cfgDir="$(pwd)/cfg.cfg"
+inputDir=$(sed -n '2p' < "$cfgDir")
+outputDir=$(sed -n '4p' < "$cfgDir")
+extension=$(sed -n '6p' < "$cfgDir")
+copiesBuffer=$(sed -n '8p' < "$cfgDir")
+
+#  сам backup
+if [ "$1" = "" ]
+then
+    #удаление старых копий
+    if [ "$copiesBuffer" -ne "-1" ]
+    then
+        x=1
+        for f in $(ls -t "$outputDir")
+        do
+            if [ $x -lt $copiesBuffer ]
+            then
+                ((x++))
+                continue
+            fi
+        rm -r "$outputDir/$f"
+        done
+    fi
+    
+    #создание директории для бэкапа
+    name="$(date +%d-%m-%Y)"
+    dirPath="$outputDir/$(date +%s---DAY:%d-%m-%Y)" 
+    mkdir "$dirPath"
+ 
+    #создание архива
+    zip -9 -q "$dirPath/$name.zip" "$inputDir"/*"$extension"
+ 
+    #вычисление контрольной суммы архива и занесение в контрольный файл
+    sum=($(md5sum "$dirPath/$name.zip"))
+    echo "$sum" > "$dirPath/$name.control"
+ 
+    exit 0
+fi
+
+# сравнение контрольных сумм 
+if [ "$1" = "check" ]
+then
+    echo Введите путь к каталогу с файлами .zip и .control, который нужно проверить на целостность:
+    read checkDir
+    archName=$(find "$checkDir"/*".zip")
+    fileSum=$(cat "$checkDir"/*".control")
+    currentSum=($(md5sum "$archName"))
+    if [ "$fileSum" = "$currentSum" ]
+    then
+      echo "Все ОК! Резервная копия не повреждена"
+      exit 0
+    else
+      echo "Ой! Резервная копия повреждена"
+      exit 1
+    fi
+fi
+
+# установка периода резервного копирования
+if [ "$1" = "period" ]
+then
+    echo Задайте периодичность резервного копирования в формате crontab:
+    read period
+    crontab -l | grep -v "$(pwd)/backup" | crontab -
+    (crontab -l 2>/dev/null; echo "$period '$(pwd)/backup'") | crontab -
+    exit 0
+fi
